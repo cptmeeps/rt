@@ -1,15 +1,25 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.nn import LayerNorm
-import math
-from torch import nn, optim
+import time
+import requests
+from PIL import Image
 import numpy as np
+#import tensorflow as tf
+#import tensorflow_datasets as tfds
+import torch
+from torch import nn, optim
+from torch.nn import LayerNorm
+import torch.nn.functional as F
 from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
+from llama2 import Llama
+from clip import load_clip, test_image_encode
+
+#torch.set_default_tensor_type('torch.cuda')
+
+# dataloader
 
 class RoboticsDataset(Dataset):
   def __init__(self, tf_dataset):
-    self.tf_dataset = list(tf_dataset)  # Convert to list for easier indexing
+    self.tf_dataset = list(tf_dataset)
     self.batch_size = 8
 
   def __len__(self):
@@ -17,51 +27,31 @@ class RoboticsDataset(Dataset):
 
   def __getitem__(self, idx):
     episode = self.tf_dataset[idx]
-    steps = list(episode['steps'])  # Convert to list for easier indexing
+    output = self.process_episode(episode)
+    return output
 
-    inputs = []
-    labels = []
-
-    for i in range(0, len(steps) - 1, self.batch_size):
-      batch_inputs = []
-      batch_labels = []
-
-      for j in range(i, min(i + self.batch_size, len(steps) - 1)):
-        current_step = steps[j]
-        next_step = steps[j + 1]
-
-        image = current_step['observation']['image'].numpy()
-        image = image.astype(np.float32)
-        instruction = current_step['observation']['natural_language_instruction'].numpy()
-        axis_angle = current_step['observation']['present/axis_angle'].numpy()
-        xyz = current_step['observation']['present/xyz'].numpy()
-        sensed_close = current_step['observation']['present/sensed_close'].numpy()
-        current_state = np.concatenate((axis_angle, xyz, sensed_close), axis=0)
-        input_features = {
-          'image' : image,
-          'instruction' : instruction,
-          'state' : current_state
-        }
-
-        label_axis_angle = next_step['observation']['present/axis_angle'].numpy()
-        label_xyz = next_step['observation']['present/xyz'].numpy()
-        label_sensed_close = next_step['observation']['present/sensed_close'].numpy()
-        label_state = np.concatenate((label_axis_angle, label_xyz, label_sensed_close), axis=0)
-
-        batch_inputs.append(input_features)
-        batch_labels.append(label_state)
-
-      inputs.append(batch_inputs)
-      labels.append(batch_labels)
-
-    inputs_tensor = torch.tensor(inputs, dtype=torch.float32)
-    labels_tensor = torch.tensor(labels, dtype=torch.float32)
-    return inputs_tensor, labels_tensor
-
-tf_dataset = ds
-torch_dataset = RoboticsDataset(tf_dataset)
-data_loader = DataLoader(torch_dataset, batch_size=1, shuffle=True)
-
+  def process_episode(self, episode):
+    steps = list(episode['steps'])
+    output = []
+    tgt = []
+    for i in range(0, len(steps) - 1):
+      current_step = steps[i]
+      next_step = steps[i + 1]
+      src = {
+        'image' : current_step['observation']['image'],
+        'instruction' : current_step['observation']['natural_language_instruction'],
+        'axis_angle' : current_step['observation']['present/axis_angle'],
+        'xyz' : current_step['observation']['present/xyz'],
+        'sensed_close' : current_step['observation']['present/sensed_close'],
+      }
+      tgt = {
+        'axis_angle' : next_step['observation']['present/axis_angle'],
+        'xyz' : next_step['observation']['present/xyz'],
+        'sensed_close' : next_step['observation']['present/sensed_close'],
+      }
+      output.append([src, tgt])
+    return output
+    
 # train
 
 def train_epoch(model, data_loader, loss_fn, optimizer, device):
@@ -107,7 +97,7 @@ def run_training(model, data_loader, epochs=10, checkpoint_path=None):
         'optimizer_state_dict': optimizer.state_dict(),
       }, checkpoint_filename)
 
-# model
+# tokenizer
 
 class Tokenizer:
   def __init__(self):
@@ -133,16 +123,21 @@ class Tokenizer:
   def decode(self, token_ids):
     return ' '.join(self.id_to_token[token_id] for token_id in token_ids)
 
+
+
+# model
+
 class ModelArgs:
   dim = 4096
   depth = 32
   heads = 32
   vocab_size = -1  
   output_len = 6
-  ffn_mult = None
+  ffn_mult = 2
   norm_eps = 1e-5
   max_batch_size = 1 # 32
   max_seq_len = 1024 # 4096
+  dropout = 0.1
 
 class TransformerBlock(nn.Module):
   def __init__(self, args):
@@ -175,9 +170,15 @@ class Transformer(nn.Module):
       self.layers.append(TransformerBlock(args))
     self.norm = LayerNorm(args.dim, eps=args.norm_eps)    
     self.reg_output = nn.Linear(args.dim, args.output_len)
+    
+    self.image_encode, self.image_preprocess = load_clip("ViT-L/14@336px")
+    self.image_encode.cuda().eval()
+    self.text_encode = Llama()
+    
 
   def forward(self, tokens):
     _bsz, seqlen = tokens.shape
+
     h = self.tok_embeddings(tokens)
     positions = torch.arange(0, seqlen, dtype=torch.long, device=h.device)
     h += self.pos_embeddings(positions)
@@ -187,3 +188,19 @@ class Transformer(nn.Module):
     h = self.norm(h)
     output = self.reg_output(h.mean(dim=1)) 
     return output
+
+
+class RT:
+  def __init__(self):
+    start_time = time.time()
+    tokenizer = Tokenizer()
+    model_args = ModelArgs()
+    model_args.vocab_size = 100000#tokenizer.n_words
+    # checkpoint = torch.load("consolidated.00.pth", map_location="cuda")
+    model = Transformer(model_args)
+    # model.load_state_dict(checkpoint, strict=False)
+    self.model = model
+    self.tokenizer = tokenizer   
+
+
+rt = RT()
