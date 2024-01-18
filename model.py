@@ -82,13 +82,6 @@ class Tokenizer:
   def decode(self, token_ids):
     return ' '.join(self.id_to_token[token_id] for token_id in token_ids)
 
-  def test(self):
-    encoded = tokenizer.encode('+ 415 . 19001')
-    print(f'encoded tokens\t\t[100000, 415, 100002, 19001]\n\t\t\t{encoded}')
-    decoded = tokenizer.decode(encoded)
-    print(decoded)
-    print(f'decoded string\t\t+ 415 . 19001\n\t\t\t{decoded}')
-
 class ModelArgs:
   dim = 4096
   n_layers = 32
@@ -100,54 +93,25 @@ class ModelArgs:
   max_batch_size = 1 # 32
   max_seq_len = 1024 # 4096
 
-class FeedForward(nn.Module):
-  def __init__(self, dim, ffn_mult=2):
-    super().__init__()
-    hidden_dim = dim * ffn_mult
-    self.w1 = nn.Linear(dim, hidden_dim)
-    self.w2 = nn.Linear(hidden_dim, dim)
-    self.w3 = nn.Linear(dim, hidden_dim)
-
-  def forward(self, x):
-    return self.w2(F.silu(self.w1(x)) * self.w3(x))
-
-class Attention(nn.Module):
-  def __init__(self, args):
-    super().__init__()
-    self.n_heads = args.n_heads
-    self.head_dim = args.dim // args.n_heads
-    self.wq = nn.Linear(args.dim, args.n_heads * self.head_dim)
-    self.wk = nn.Linear(args.dim, args.n_heads * self.head_dim)
-    self.wv = nn.Linear(args.dim, args.n_heads * self.head_dim)
-    self.wo = nn.Linear(args.n_heads * self.head_dim, args.dim)
-
-  def forward(self, x):
-    bsz, seqlen, _ = x.shape
-    xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
-    xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
-    xk = xk.view(bsz, seqlen, self.n_heads, self.head_dim)
-    xv = xv.view(bsz, seqlen, self.n_heads, self.head_dim)
-    xq = xq.transpose(1, 2)  # (bs, n_heads, seqlen, head_dim)
-    xk = xk.transpose(1, 2)  
-    xv = xv.transpose(1, 2)  
-    scores = torch.matmul(xq, xk.transpose(2, 3)) / math.sqrt(self.head_dim)
-    scores = F.softmax(scores, dim=-1)
-    output = torch.matmul(scores, xv)  # (bs, n_heads, seqlen, head_dim)
-    output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
-    return self.wo(output)
-
 class TransformerBlock(nn.Module):
   def __init__(self, args):
     super().__init__()
-    self.attention = Attention(args)
-    self.feed_forward = FeedForward(args.dim, args.ffn_mult)
-    self.attention_norm = LayerNorm(args.dim, eps=args.norm_eps)
-    self.ffn_norm = LayerNorm(args.dim, eps=args.norm_eps)
+    self.attention = nn.MultiheadAttention(embed_dim=args.dim, num_heads=args.n_heads, batch_first=True)
+    self.attention_norm = nn.LayerNorm(args.dim, eps=args.norm_eps)
+    self.ffn_norm = nn.LayerNorm(args.dim, eps=args.norm_eps)
+    self.feed_forward = nn.Sequential(
+      nn.Linear(args.dim, args.ffn_mult * args.dim),
+      nn.ReLU(),
+      nn.Dropout(args.dropout),
+      nn.Linear(args.ffn_mult * args.dim, args.dim)
+    )
 
   def forward(self, x):
     x_norm = self.attention_norm(x)
-    h = x + self.attention(x_norm)
-    out = h + self.feed_forward.forward(self.ffn_norm(h))
+    attn_output, _ = self.attention(x_norm, x_norm, x_norm)
+    h = x + attn_output
+    h_norm = self.ffn_norm(h)
+    out = h + self.feed_forward(h_norm)
     return out
 
 class Transformer(nn.Module):
