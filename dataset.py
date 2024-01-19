@@ -1,54 +1,110 @@
-import tqdm
-from PIL import Image
+import os
+import pickle
+import boto3
 import numpy as np
-import tensorflow as tf
-import tensorflow_datasets as tfds
-import torch
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
 
-class RoboticsDataset(Dataset):
-  def __init__(self, tf_dataset):
-    self.tf_dataset = list(tf_dataset)
+# s3 utils
 
-  def __len__(self):
-    return len(self.tf_dataset)
+s3_client = boto3.client(
+  's3',a
+  region_name = os.getenv('aws_region_name'),
+  aws_access_key_id = os.getenv('aws_access_key_id'),
+  aws_secret_access_key = os.getenv('aws_secret_access_key'),
+)  
 
-  def __getitem__(self, idx):
-    episode = self.tf_dataset[idx]
-    output = self.process_episode(episode)
-    return output
+def download_pkl():
+  s3_client.download_file(bucket_name, file_name, file_name)
+  with open(file_name, 'rb') as file:
+    data = pickle.load(file)
+  os.remove(file_name)
+  return data
 
-def process_bcz_episode(episode):
-  steps = list(episode['steps'])
-  output = []
-  tgt = []
-  for i in range(0, len(steps) - 1):
-    current_step = steps[i]
-    next_step = steps[i + 1]
-    src = {
-      'image' : current_step['observation']['image'],
-      'instruction' : current_step['observation']['natural_language_instruction'],
-      'axis_angle' : current_step['observation']['present/axis_angle'],
-      'xyz' : current_step['observation']['present/xyz'],
-      'sensed_close' : current_step['observation']['present/sensed_close'],
-    }
-    tgt = {
-      'axis_angle' : next_step['observation']['present/axis_angle'],
-      'xyz' : next_step['observation']['present/xyz'],
-      'sensed_close' : next_step['observation']['present/sensed_close'],
-    }
-    output.append([src, tgt])
+def get_obj_count(bucket_name, display=True):
+  paginator = s3_client.get_paginator('list_objects_v2')
+  page_iterator = paginator.paginate(Bucket=bucket_name)
+  object_count = 0
+  for page in page_iterator:
+    object_count += len(page.get('Contents', []))
+  if display: print(bucket_name, ' obj count: ', object_count)
+  return object_count
 
-def sample_bcz():
-    b = tfds.builder_from_directory(builder_dir='gs://gresearch/robotics/bc_z/0.1.0')
-    tf_dataset = b.as_dataset(split='train[:30]')#.shuffle(10) 
+def upload_pkl(dictionary, bucket_name, file_name):
+  file_name = file_name + '.pkl'
+  with open(file_name, 'wb') as file:
+    pickle.dump(dictionary, file)
+  with open(file_name, 'rb') as file:
+    s3_client.put_object(Bucket=bucket_name, Key=file_name, Body=file)
+  os.remove(file_name)
 
-def download_bcz():
-  print(f"downloading bcz")
-  _ = tfds.load('bc_z', data_dir='~/bcz_dataset')
-
+# bc_z export
   
-    
+def extract_step(current, next, episode_id, step_count):
+  current_obs = current['observation']
+  next_obs = next['observation']
+  step_data = {
+    # metadata
+    'id' : str(episode_id) + '_' + str(step_count),
+    'is_first' : current['is_first'].numpy(),
+    'is_last' : current['is_last'].numpy(),
+    'is_terminal' : current['is_terminal'].numpy(),
+    'episode_success' : current_obs['episode_success'].numpy(),
+    'intervention' : current_obs['present/intervention'].numpy(),
+    'autonomous' : current_obs['present/autonomous'].numpy(),
+    'ttl_step_count' : current_obs['sequence_length'].numpy(),
+    'current_step_count' : step_count,
+    # source
+    'image' : current_obs['image'].numpy(),
+    'nl_instructions' : current_obs['natural_language_instruction'].numpy().decode('utf-8'),
+    'nl_embedding_bcz' : current_obs['natural_language_embedding'].numpy(),
+    'current_axis' : current_obs['present/axis_angle'].numpy(),
+    'current_xyz' : current_obs['present/xyz'].numpy(),
+    'current_gripper' : current_obs['present/sensed_close'].numpy(),
+    # target
+    'next_axis' : next_obs['present/axis_angle'].numpy(),
+    'next_xyz' : next_obs['present/xyz'].numpy(),
+    'next_gripper' : next_obs['present/sensed_close'].numpy(),
+    'future_axis_res' : current['action']['future/axis_angle_residual'].numpy(),
+    'future_xyz_res' : current['action']['future/xyz_residual'].numpy(),
+    'future_gripper' : current['action']['future/target_close'].numpy(),
+  }
+  return step_data
 
-download_bcz()
+def extract_episode(episode, episode_id):
+  steps = list(episode['steps'])
+  steps_len = len(steps)
+  output = []
+  for i in range(0, steps_len - 1):
+    step_data = extract_step(steps[i], steps[i+1], episode_id, i)
+    output.append(step_data)
+  last_step = steps[steps_len - 1]
+  step_data = extract_step(last_step, last_step, episode_id, steps_len)
+  output.append(step_data)
+  return output
+    
+def export_batch():
+  start_index = get_obj_count('bcz-pkl')
+  batch_size = 1000 
+  split_str = f'train[{start_index}:{start_index+batch_size}]'
+  print(split_str)
+  url = 'gs://gresearch/robotics/bc_z/0.1.0'
+  ds_builder = tfds.builder_from_directory(builder_dir=url)
+  ds = ds_builder.as_dataset(split=split_str)
+  episode_id = start_index
+  for episode in ds:
+    print('episode: ', episode_id)
+    episode_data = extract_episode(episode, episode_id)
+    upload_pkl(episode_data, 'bcz-pkl', str(episode_id))
+    episode_id += 1
+
+# bc_z encode
+
+ep = download_pkl('bcz-pkl', '1.pkl')
+print(len(ep))
+
+
+
+
+
+
+
+
