@@ -13,45 +13,6 @@ from torch.utils.data import DataLoader
 from llama2 import Llama
 from clip import load_clip, test_image_encode
 
-#torch.set_default_tensor_type('torch.cuda')
-
-# dataloader
-
-class RoboticsDataset(Dataset):
-  def __init__(self, tf_dataset):
-    self.tf_dataset = list(tf_dataset)
-    self.batch_size = 8
-
-  def __len__(self):
-    return len(self.tf_dataset)
-
-  def __getitem__(self, idx):
-    episode = self.tf_dataset[idx]
-    output = self.process_episode(episode)
-    return output
-
-  def process_episode(self, episode):
-    steps = list(episode['steps'])
-    output = []
-    tgt = []
-    for i in range(0, len(steps) - 1):
-      current_step = steps[i]
-      next_step = steps[i + 1]
-      src = {
-        'image' : current_step['observation']['image'],
-        'instruction' : current_step['observation']['natural_language_instruction'],
-        'axis_angle' : current_step['observation']['present/axis_angle'],
-        'xyz' : current_step['observation']['present/xyz'],
-        'sensed_close' : current_step['observation']['present/sensed_close'],
-      }
-      tgt = {
-        'axis_angle' : next_step['observation']['present/axis_angle'],
-        'xyz' : next_step['observation']['present/xyz'],
-        'sensed_close' : next_step['observation']['present/sensed_close'],
-      }
-      output.append([src, tgt])
-    return output
-    
 # train
 
 def train_epoch(model, data_loader, loss_fn, optimizer, device):
@@ -123,8 +84,6 @@ class Tokenizer:
   def decode(self, token_ids):
     return ' '.join(self.id_to_token[token_id] for token_id in token_ids)
 
-
-
 # model
 
 class ModelArgs:
@@ -189,7 +148,6 @@ class Transformer(nn.Module):
     output = self.reg_output(h.mean(dim=1)) 
     return output
 
-
 class RT:
   def __init__(self):
     start_time = time.time()
@@ -201,6 +159,3 @@ class RT:
     # model.load_state_dict(checkpoint, strict=False)
     self.model = model
     self.tokenizer = tokenizer   
-
-
-rt = RT()
