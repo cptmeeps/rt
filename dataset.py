@@ -2,17 +2,21 @@ import os
 import pickle
 import boto3
 import numpy as np
+import torch
+from llama2 import Llama
+from clip import load_clip, test_image_encode
+
 
 # s3 utils
 
 s3_client = boto3.client(
-  's3',a
+  's3',
   region_name = os.getenv('aws_region_name'),
   aws_access_key_id = os.getenv('aws_access_key_id'),
   aws_secret_access_key = os.getenv('aws_secret_access_key'),
 )  
 
-def download_pkl():
+def download_pkl(bucket_name, file_name):
   s3_client.download_file(bucket_name, file_name, file_name)
   with open(file_name, 'rb') as file:
     data = pickle.load(file)
@@ -82,7 +86,7 @@ def extract_episode(episode, episode_id):
   return output
     
 def export_batch():
-  start_index = get_obj_count('bcz-pkl')
+  start_index = get_obj_count('bcz-pkl') - 1
   batch_size = 1000 
   split_str = f'train[{start_index}:{start_index+batch_size}]'
   print(split_str)
@@ -98,13 +102,49 @@ def export_batch():
 
 # bc_z encode
 
-ep = download_pkl('bcz-pkl', '1.pkl')
-print(len(ep))
+txt_model = None
+image_model = None
+image_preprocess = None
+
+def encode_step(step):
+  image = step['image']
+  nl_instr = step['nl_instructions']
+  print(nl_instr)
+  # src
+  src_axis = step['current_axis']
+  src_xyz = step['current_xyz']
+  src_grip = step['current_gripper']
+  # tgt
+  tgt_axis = step['next_axis']
+  tgt_xyz = step['next_xyz']
+  tgt_grip = step['next_gripper']
+
+  text_encode = txt_model([nl_instr])
+  print(text_encode)
+  print()
+  print(image.shape)
+  image = torch.from_numpy(image).permute(2, 0, 1)
+  print(image.shape)
+  return text_encode, image_encode
+
+
+def encode_batch():
+  # txt_model = Llama()
+  # image_model, image_preprocess = load_clip("ViT-L/14@336px")
+  # image_model.cuda().eval()  
+  input_bucket = 'bcz-pkl'
+  output_bucket = 'bcz-encode'
+  # start_index = get_obj_count(output_bucket) - 1
+  start_index = 0
+  end_index = start_index + 1
+  for n in range(start_index, end_index):
+    ep = download_pkl('bcz-pkl', f'{n}.pkl')
+    if not ep[0]['episode_success']: continue
+    for step in ep:
+      text_encode, image_encode = encode_step(step)
+      step['text_encode'] = text_encode
+      step['image_encode'] = image_encode
 
 
 
-
-
-
-
-
+encode_batch()
