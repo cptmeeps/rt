@@ -7,11 +7,9 @@ import torch
 from llama2 import Llama
 from clip import load_clip, test_image_encode
 
-# cuda
+# utils
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
-
-# s3 utils
 
 s3_client = boto3.client(
   's3',
@@ -107,40 +105,27 @@ def export_batch():
 # bc_z encode
 
 def encode_batch():
+  input_bucket = 'bcz-pkl'
+  output_bucket = 'bcz-encode'
   text_model = Llama()
   image_model, image_preproc = load_clip("ViT-L/14@336px")
   image_model.cuda().eval()  
-  input_bucket = 'bcz-pkl'
-  output_bucket = 'bcz-encode'
-  # start_index = get_obj_count(output_bucket) - 1
-  start_index = 0
-  end_index = start_index + 1
-  for n in range(start_index, end_index):
+  start_index = get_obj_count(output_bucket) - 1
+  for n in range(start_index, start_index + 100):
     ep = download_pkl('bcz-pkl', f'{n}.pkl')
     if not ep[0]['episode_success']: continue
     instr = ep[0]['nl_instructions']
     text_encode = text_model.encode_text([instr])
-    print(text_encode)
+    output = []
+    print('episode encoded: ', n)
     for step in ep:
-      # src
-      src_axis = step['current_axis']
-      src_xyz = step['current_xyz']
-      src_grip = step['current_gripper']
-      # tgt
-      tgt_axis = step['next_axis']
-      tgt_xyz = step['next_xyz']
-      tgt_grip = step['next_gripper']
-
-      step['text_encode'] = text_encode
-
+      src = np.concatenate((step['current_xyz'], step['current_axis'], step['current_gripper']))
+      step['src'] = ' '.join(src.astype(str))
+      step['tgt'] = np.concatenate((step['next_xyz'], step['next_axis'], step['next_gripper']))
       image = Image.fromarray(step['image'])
-      image = image_preproc(image)
-      step['image_encode'] = image_model(image)
+      step['image_encode'] = image_preproc(image).unsqueeze(0).to("cuda")
+      step['text_encode'] = text_encode
+      output.append(step)
+    upload_pkl(output, output_bucket, str(n))
 
-      # step['text_encode'] = text_encode
-      # step['image_encode'] = image_encode
-
-
-
-
-encode_batch()
+# encode_batch()
