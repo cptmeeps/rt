@@ -16,7 +16,6 @@ torch.set_default_tensor_type('torch.cuda.HalfTensor')
 
 class Tokenizer:
   def __init__(self, model_path: str):
-    # print(f"Tokenizer.init")
     assert os.path.isfile(model_path), model_path
     self.sp_model = SentencePieceProcessor(model_file=model_path)
     self.n_words: int = self.sp_model.vocab_size()
@@ -269,8 +268,6 @@ class Transformer(nn.Module):
 
 class Llama:
   def __init__(self):
-    print("\n\nLlama.init")
-    print(f"\tGPU mem avaialable:", torch.cuda.get_device_properties(0).total_memory)
     start_time = time.time()
     tokenizer = Tokenizer(model_path="tokenizer.model")
     model_args = ModelArgs()
@@ -278,7 +275,7 @@ class Llama:
     checkpoint = torch.load("consolidated.00.pth", map_location="cuda")
     model = Transformer(model_args)
     model.load_state_dict(checkpoint, strict=False)
-    print(f"\tloaded in {time.time() - start_time:.2f} seconds")
+    print(f"llama loaded in {time.time() - start_time:.2f} seconds")
     print(f"\tmemory alloc: {torch.cuda.memory_allocated(0)}")
     self.model = model
     self.tokenizer = tokenizer
@@ -298,7 +295,7 @@ class Llama:
   def test_encode(self):
     start_time = time.time()
     prompt = ["Tell me 3 facts about the color red"]
-    encodings = self.encode_text(prompts)
+    encodings = self.encode_text(prompt)
     print(f"expected values:")
     print(f"\t1   [-0.0799,  1.6094,  3.1934,  ...,  1.3057, -0.8794,  1.9229]")
     print(f"\t2   [ 3.8477, -1.5674,  0.4629,  ..., -1.9082,  3.5605,  0.6763]")
