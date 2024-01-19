@@ -1,11 +1,15 @@
 import os
 import pickle
 import boto3
+from PIL import Image
 import numpy as np
 import torch
 from llama2 import Llama
 from clip import load_clip, test_image_encode
 
+# cuda
+
+torch.set_default_tensor_type('torch.cuda.FloatTensor')
 
 # s3 utils
 
@@ -102,36 +106,10 @@ def export_batch():
 
 # bc_z encode
 
-txt_model = None
-image_model = None
-image_preprocess = None
-
-def encode_step(step):
-  image = step['image']
-  nl_instr = step['nl_instructions']
-  print(nl_instr)
-  # src
-  src_axis = step['current_axis']
-  src_xyz = step['current_xyz']
-  src_grip = step['current_gripper']
-  # tgt
-  tgt_axis = step['next_axis']
-  tgt_xyz = step['next_xyz']
-  tgt_grip = step['next_gripper']
-
-  text_encode = txt_model([nl_instr])
-  print(text_encode)
-  print()
-  print(image.shape)
-  image = torch.from_numpy(image).permute(2, 0, 1)
-  print(image.shape)
-  return text_encode, image_encode
-
-
 def encode_batch():
-  # txt_model = Llama()
-  # image_model, image_preprocess = load_clip("ViT-L/14@336px")
-  # image_model.cuda().eval()  
+  text_model = Llama()
+  image_model, image_preproc = load_clip("ViT-L/14@336px")
+  image_model.cuda().eval()  
   input_bucket = 'bcz-pkl'
   output_bucket = 'bcz-encode'
   # start_index = get_obj_count(output_bucket) - 1
@@ -140,10 +118,28 @@ def encode_batch():
   for n in range(start_index, end_index):
     ep = download_pkl('bcz-pkl', f'{n}.pkl')
     if not ep[0]['episode_success']: continue
+    instr = ep[0]['nl_instructions']
+    text_encode = text_model.encode_text([instr])
+    print(text_encode)
     for step in ep:
-      text_encode, image_encode = encode_step(step)
+      # src
+      src_axis = step['current_axis']
+      src_xyz = step['current_xyz']
+      src_grip = step['current_gripper']
+      # tgt
+      tgt_axis = step['next_axis']
+      tgt_xyz = step['next_xyz']
+      tgt_grip = step['next_gripper']
+
       step['text_encode'] = text_encode
-      step['image_encode'] = image_encode
+
+      image = Image.fromarray(step['image'])
+      image = image_preproc(image)
+      step['image_encode'] = image_model(image)
+
+      # step['text_encode'] = text_encode
+      # step['image_encode'] = image_encode
+
 
 
 
