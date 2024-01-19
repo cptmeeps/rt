@@ -221,7 +221,6 @@ def convert_weights(model: nn.Module):
   model.apply(_convert_weights_to_fp16)
 
 def build_model(state_dict: dict):
-  print(f"build model")
   start_time = time.time()
   vision_width = state_dict["visual.conv1.weight"].shape[0]
   vision_layers = len([k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")])
@@ -245,13 +244,10 @@ def build_model(state_dict: dict):
   for key in ["input_resolution", "context_length", "vocab_size"]:
     if key in state_dict:
       del state_dict[key]
-  print(f"\tconverting weights")
   convert_weights(model)
-  print(f"\tloading state_dict")
   model.load_state_dict(state_dict, strict=False)
-  print(f"\tbuilt in {time.time() - start_time:.2f} seconds")
-  print(f"\tmemory alloc: {torch.cuda.memory_allocated(0) / 1}")
-  print("\tmodel params:", f"{np.sum([int(np.prod(p.shape)) for p in model.parameters()]):,}")
+  print(f"clip loaded in {time.time() - start_time:.2f} seconds")
+  print(f"\tmemory alloc: {torch.cuda.memory_allocated(0)}")
   return model.eval()
 
 def _download(url: str, root: str = '.'):
@@ -304,7 +300,6 @@ def load_clip(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda
   else:
     raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
 
-  print(f"load model")
   with open(model_path, 'rb') as opened_file:
     try:
       # loading JIT archive
@@ -313,12 +308,11 @@ def load_clip(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda
     except RuntimeError:
       # loading saved state dict
       if jit:
-        warnings.warn(f"\tFile {model_path} is not a JIT archive. Loading as a state dict instead")
+        # warnings.warn(f"\tFile {model_path} is not a JIT archive. Loading as a state dict instead")
         jit = False
       state_dict = torch.load(opened_file, map_location="cpu")
 
   if not jit:
-    print(f"\t loading model directly from state_dict (not jit)")
     model = build_model(state_dict or model.state_dict()).to(device)
     if str(device) == "cpu":
       model.float()
