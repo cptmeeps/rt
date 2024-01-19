@@ -295,10 +295,9 @@ class Llama:
     encodings = self.model.forward(tokens, 0)
     return encodings
 
-  def test_encode(self, prompt=None):
+  def test_encode(self):
     start_time = time.time()
-    if not prompt: 
-      prompts = ["Tell me 3 facts about the color red"]
+    prompt = ["Tell me 3 facts about the color red"]
     encodings = self.encode_text(prompts)
     print(f"expected values:")
     print(f"\t1   [-0.0799,  1.6094,  3.1934,  ...,  1.3057, -0.8794,  1.9229]")
