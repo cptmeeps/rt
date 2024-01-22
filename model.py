@@ -18,8 +18,12 @@ class Tokenizer:
     
     special_tokens = [
       '+', '-', '.',
-      'a_x_s', 'a_y_s', 'a_z_s', 'a_x_e', 'a_y_e', 'a_z_e',
-      'c_x_s', 'c_y_s', 'c_z_s', 'c_x_e', 'c_y_e', 'c_z_e',
+      'pos_x_start', 'pos_x_end',
+      'pos_y_start', 'pos_y_end',
+      'pos_z_start', 'pos_z_end',
+      'angle_x_start', 'angle_x_end',
+      'angle_y_start', 'angle_y_end',
+      'angle_z_start', 'angle_z_end',
       'grip_open', 'grip_close'
     ]
 
@@ -28,6 +32,26 @@ class Tokenizer:
       self.token_to_id[token] = start_id
       self.id_to_token[start_id] = token
       start_id += 1
+
+  def split_and_round_floats(self, float_string):
+    float_list = float_string.split()
+    result = []
+    tokens = [
+      'pos_x_start', 'pos_x_end',
+      'pos_y_start', 'pos_y_end',
+      'pos_z_start', 'pos_z_end',
+      'angle_x_start', 'angle_x_end',
+      'angle_y_start', 'angle_y_end',
+      'angle_z_start', 'angle_z_end',
+      'grip_open', 'grip_close'
+    ]
+    
+    for i, num in enumerate(float_list):
+      sign = '+' if float(num) >= 0 else '-'
+      integer_part, decimal_part = num.lstrip('-+').split('.')
+      rounded_decimal = str(round(float('0.' + decimal_part), 4))[2:]
+      result.extend([tokens[i*2], sign, integer_part, '.', rounded_decimal, tokens[i*2+1]])
+    return result
 
   def encode(self, text):
     return [self.token_to_id[token] for token in text.split()]
