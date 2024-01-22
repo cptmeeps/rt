@@ -7,6 +7,57 @@ import torch
 from llama2 import Llama
 from clip import load_clip, test_image_encode
 
+class Tokenizer:
+  def __init__(self):
+    self.token_to_id = {f"{num:05}": num for num in range(1, 10000)}
+    self.id_to_token = {num: f"{num:05}" for num in range(1, 10000)}
+    
+    special_tokens = [
+      '+', '-', '.',
+      'pos_x_start', 'pos_x_end',
+      'pos_y_start', 'pos_y_end',
+      'pos_z_start', 'pos_z_end',
+      'angle_x_start', 'angle_x_end',
+      'angle_y_start', 'angle_y_end',
+      'angle_z_start', 'angle_z_end',
+      'grip_open', 'grip_close'
+    ]
+
+    start_id = 10000
+    for token in special_tokens:
+      self.token_to_id[token] = start_id
+      self.id_to_token[start_id] = token
+      start_id += 1
+
+  def split_and_round_floats(self, float_string):
+    float_list = float_string.split()
+    result = []
+    tokens = [
+      'pos_x_start', 'pos_x_end',
+      'pos_y_start', 'pos_y_end',
+      'pos_z_start', 'pos_z_end',
+      'angle_x_start', 'angle_x_end',
+      'angle_y_start', 'angle_y_end',
+      'angle_z_start', 'angle_z_end',
+      'grip_open', 'grip_close'
+    ]
+    
+    for i, num in enumerate(float_list):
+      sign = '+' if float(num) >= 0 else '-'
+      integer_part, decimal_part = num.lstrip('-+').split('.')
+      rounded_decimal = str(round(float('0.' + decimal_part), 4))[2:]
+      integer_part_with_leading_zeros = f"{int(integer_part):05}"
+      result.extend([tokens[i*2], sign, integer_part_with_leading_zeros, '.', rounded_decimal, tokens[i*2+1]])
+    return result
+
+  def encode(self, text):
+    split_text = self.split_and_round_floats(text)
+    return [self.token_to_id[token] for token in split_text]
+
+  def decode(self, token_ids):
+    return ' '.join(self.id_to_token[token_id] for token_id in token_ids)
+
+
 # utils
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
@@ -42,7 +93,7 @@ def upload_pkl(dictionary, bucket_name, file_name):
     s3_client.put_object(Bucket=bucket_name, Key=file_name, Body=file)
   os.remove(file_name)
 
-# bc_z export
+# bc_z pipeline
   
 def extract_step(current, next, episode_id, step_count):
   current_obs = current['observation']
@@ -102,8 +153,6 @@ def export_batch():
     upload_pkl(episode_data, 'bcz-pkl', str(episode_id))
     episode_id += 1
 
-# bc_z encode
-
 def encode_batch():
   input_bucket = 'bcz-pkl'
   output_bucket = 'bcz-encode'
@@ -119,13 +168,40 @@ def encode_batch():
     output = []
     print('episode encoded: ', n)
     for step in ep:
-      src = np.concatenate((step['current_xyz'], step['current_axis'], step['current_gripper']))
+      src = np.concatenate((
+        step['current_xyz'], step['current_axis'], step['current_gripper']
+      ))
       step['src'] = ' '.join(src.astype(str))
-      step['tgt'] = np.concatenate((step['next_xyz'], step['next_axis'], step['next_gripper']))
+      step['tgt'] = np.concatenate((
+        step['next_xyz'], step['next_axis'], step['next_gripper']
+      ))
       image = Image.fromarray(step['image'])
       step['image_encode'] = image_preproc(image).unsqueeze(0).to("cuda")
       step['text_encode'] = text_encode
       output.append(step)
     upload_pkl(output, output_bucket, str(n))
 
-# encode_batch()
+# bc_z dataloader
+def get_ep(ep_num=1):
+  ep = download_pkl('bcz-encode', f'{ep_num}.pkl')
+  print('step count: ', len(ep))
+  step_1 = ep[0]  
+  src = step_1['src']
+  tokenizer = Tokenizer()
+  print(src)
+  # token_ids = tokenizer.split_and_round_floats(src)
+  # token_ids = tokenizer.encode(src)
+  print(token_id)
+
+
+# keys = [print(key) for key in step_1]
+# tokens = tokenizer.split_process(src)
+# print(src)
+# print(tokens)
+# print('token_to_id len: ', len(tokenizer.token_to_id))
+# print('id_to_token')
+
+get_ep()
+
+
+
