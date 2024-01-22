@@ -191,7 +191,6 @@ class CLIP(nn.Module):
     return self.visual(image.type(self.dtype))
   
   def forward(self, image):
-    print(f"CLIP.forward")
     image_features = self.encode_image(image)
     return image_features
 
@@ -246,8 +245,8 @@ def build_model(state_dict: dict):
       del state_dict[key]
   convert_weights(model)
   model.load_state_dict(state_dict, strict=False)
-  print(f"clip loaded in {time.time() - start_time:.2f} seconds")
-  print(f"\tmemory alloc: {torch.cuda.memory_allocated(0)}")
+  print(f"clip loaded:\t{time.time() - start_time:.2f} seconds")
+  print(f" mem alloc: {round(torch.cuda.memory_allocated(0) / (1024 ** 3))} GB")
   return model.eval()
 
 def _download(url: str, root: str = '.'):
