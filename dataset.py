@@ -5,15 +5,14 @@ from PIL import Image
 import numpy as np
 import torch
 from llama2 import Llama
-from clip import load_clip, test_image_encode
+from clip import load_clip
 
 class Tokenizer:
   def __init__(self):
-    self.token_to_id = {f"{num:05}": num for num in range(1, 10000)}
-    self.id_to_token = {num: f"{num:05}" for num in range(1, 10000)}
-    
-    special_tokens = [
-      '+', '-', '.',
+    self.token_to_id = {f"{num:05}": num for num in range(0, 100000)}
+    self.id_to_token = {num: f"{num:05}" for num in range(0, 100000)} 
+    self.symbols = ['+', '-', '.',]
+    self.markups = [ 
       'pos_x_start', 'pos_x_end',
       'pos_y_start', 'pos_y_end',
       'pos_z_start', 'pos_z_end',
@@ -22,36 +21,29 @@ class Tokenizer:
       'angle_z_start', 'angle_z_end',
       'grip_open', 'grip_close'
     ]
+    self.special_tokens = self.symbols + self.markups
 
-    start_id = 10000
-    for token in special_tokens:
+    start_id = 100000
+    for token in self.special_tokens:
       self.token_to_id[token] = start_id
       self.id_to_token[start_id] = token
       start_id += 1
 
-  def split_and_round_floats(self, float_string):
+  def segment_string(self, float_string):
     float_list = float_string.split()
     result = []
-    tokens = [
-      'pos_x_start', 'pos_x_end',
-      'pos_y_start', 'pos_y_end',
-      'pos_z_start', 'pos_z_end',
-      'angle_x_start', 'angle_x_end',
-      'angle_y_start', 'angle_y_end',
-      'angle_z_start', 'angle_z_end',
-      'grip_open', 'grip_close'
-    ]
-    
     for i, num in enumerate(float_list):
       sign = '+' if float(num) >= 0 else '-'
-      integer_part, decimal_part = num.lstrip('-+').split('.')
-      rounded_decimal = str(round(float('0.' + decimal_part), 4))[2:]
-      integer_part_with_leading_zeros = f"{int(integer_part):05}"
-      result.extend([tokens[i*2], sign, integer_part_with_leading_zeros, '.', rounded_decimal, tokens[i*2+1]])
+      int_part, dec_part = num.lstrip('-+').split('.')
+      dec_part = f"{int(round(float('0.' + dec_part), 5) * 100000):05}"
+      int_part = f"{int(int_part):05}"
+      chunks = [self.markups[i*2], sign, int_part, '.', dec_part, self.markups[i*2+1]]
+      result.extend(chunks)
     return result
 
   def encode(self, text):
-    split_text = self.split_and_round_floats(text)
+    # Tokenizer.encode('0.2835957 0.10540066 0.6847595 -0.56894016 0.039462574 0.043872885 0.2')
+    split_text = self.segment_string(text)
     return [self.token_to_id[token] for token in split_text]
 
   def decode(self, token_ids):
@@ -153,7 +145,7 @@ def export_batch():
     upload_pkl(episode_data, 'bcz-pkl', str(episode_id))
     episode_id += 1
 
-def encode_batch():
+def encode_batch():  
   input_bucket = 'bcz-pkl'
   output_bucket = 'bcz-encode'
   text_model = Llama()
@@ -188,20 +180,10 @@ def get_ep(ep_num=1):
   step_1 = ep[0]  
   src = step_1['src']
   tokenizer = Tokenizer()
-  print(src)
-  # token_ids = tokenizer.split_and_round_floats(src)
-  # token_ids = tokenizer.encode(src)
-  print(token_id)
+  split_src = tokenizer.segment_string(src)
+  print('split source:\t', split_src)
+  token_ids = tokenizer.encode(src)
+  print('token ids:\t', token_ids)
 
-
-# keys = [print(key) for key in step_1]
-# tokens = tokenizer.split_process(src)
-# print(src)
-# print(tokens)
-# print('token_to_id len: ', len(tokenizer.token_to_id))
-# print('id_to_token')
 
 get_ep()
-
-
-
