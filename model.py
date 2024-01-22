@@ -13,11 +13,10 @@ from clip import load_clip, test_image_encode
 
 class Tokenizer:
   def __init__(self):
-    self.token_to_id = {str(num): num for num in range(1, 100000)}
-    self.id_to_token = {num: str(num) for num in range(1, 100000)}
-    
-    special_tokens = [
-      '+', '-', '.',
+    self.token_to_id = {f"{num:05}": num for num in range(0, 100000)}
+    self.id_to_token = {num: f"{num:05}" for num in range(0, 100000)} 
+    self.symbols = ['+', '-', '.',]
+    self.markups = [ 
       'pos_x_start', 'pos_x_end',
       'pos_y_start', 'pos_y_end',
       'pos_z_start', 'pos_z_end',
@@ -26,38 +25,34 @@ class Tokenizer:
       'angle_z_start', 'angle_z_end',
       'grip_open', 'grip_close'
     ]
+    self.special_tokens = self.symbols + self.markups
 
     start_id = 100000
-    for token in special_tokens:
+    for token in self.special_tokens:
       self.token_to_id[token] = start_id
       self.id_to_token[start_id] = token
       start_id += 1
 
-  def split_and_round_floats(self, float_string):
+  def segment_string(self, float_string):
     float_list = float_string.split()
     result = []
-    tokens = [
-      'pos_x_start', 'pos_x_end',
-      'pos_y_start', 'pos_y_end',
-      'pos_z_start', 'pos_z_end',
-      'angle_x_start', 'angle_x_end',
-      'angle_y_start', 'angle_y_end',
-      'angle_z_start', 'angle_z_end',
-      'grip_open', 'grip_close'
-    ]
-    
     for i, num in enumerate(float_list):
       sign = '+' if float(num) >= 0 else '-'
-      integer_part, decimal_part = num.lstrip('-+').split('.')
-      rounded_decimal = str(round(float('0.' + decimal_part), 4))[2:]
-      result.extend([tokens[i*2], sign, integer_part, '.', rounded_decimal, tokens[i*2+1]])
+      int_part, dec_part = num.lstrip('-+').split('.')
+      dec_part = f"{int(round(float('0.' + dec_part), 5) * 100000):05}"
+      int_part = f"{int(int_part):05}"
+      chunks = [self.markups[i*2], sign, int_part, '.', dec_part, self.markups[i*2+1]]
+      result.extend(chunks)
     return result
 
   def encode(self, text):
-    return [self.token_to_id[token] for token in text.split()]
+    # Tokenizer.encode('0.2835957 0.10540066 0.6847595 -0.56894016 0.039462574 0.043872885 0.2')
+    split_text = self.segment_string(text)
+    return [self.token_to_id[token] for token in split_text]
 
   def decode(self, token_ids):
     return ' '.join(self.id_to_token[token_id] for token_id in token_ids)
+
 
 # model
 
