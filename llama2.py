@@ -275,8 +275,8 @@ class Llama:
     checkpoint = torch.load("consolidated.00.pth", map_location="cuda")
     model = Transformer(model_args)
     model.load_state_dict(checkpoint, strict=False)
-    print(f"llama loaded in {time.time() - start_time:.2f} seconds")
-    print(f"\tmemory alloc: {torch.cuda.memory_allocated(0)}")
+    print(f"llama loaded:\t{time.time() - start_time:.2f} seconds")
+    print(f" mem alloc: {round(torch.cuda.memory_allocated(0) / (1024 ** 3))} GB")
     self.model = model
     self.tokenizer = tokenizer
 
