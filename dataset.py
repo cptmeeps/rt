@@ -7,49 +7,6 @@ import torch
 from llama2 import Llama
 from clip import load_clip
 
-class Tokenizer:
-  def __init__(self):
-    self.token_to_id = {f"{num:05}": num for num in range(0, 100000)}
-    self.id_to_token = {num: f"{num:05}" for num in range(0, 100000)} 
-    self.symbols = ['+', '-', '.',]
-    self.markups = [ 
-      'pos_x_start', 'pos_x_end',
-      'pos_y_start', 'pos_y_end',
-      'pos_z_start', 'pos_z_end',
-      'angle_x_start', 'angle_x_end',
-      'angle_y_start', 'angle_y_end',
-      'angle_z_start', 'angle_z_end',
-      'grip_open', 'grip_close'
-    ]
-    self.special_tokens = self.symbols + self.markups
-
-    start_id = 100000
-    for token in self.special_tokens:
-      self.token_to_id[token] = start_id
-      self.id_to_token[start_id] = token
-      start_id += 1
-
-  def segment_string(self, float_string):
-    float_list = float_string.split()
-    result = []
-    for i, num in enumerate(float_list):
-      sign = '+' if float(num) >= 0 else '-'
-      int_part, dec_part = num.lstrip('-+').split('.')
-      dec_part = f"{int(round(float('0.' + dec_part), 5) * 100000):05}"
-      int_part = f"{int(int_part):05}"
-      chunks = [self.markups[i*2], sign, int_part, '.', dec_part, self.markups[i*2+1]]
-      result.extend(chunks)
-    return result
-
-  def encode(self, text):
-    # Tokenizer.encode('0.2835957 0.10540066 0.6847595 -0.56894016 0.039462574 0.043872885 0.2')
-    split_text = self.segment_string(text)
-    return [self.token_to_id[token] for token in split_text]
-
-  def decode(self, token_ids):
-    return ' '.join(self.id_to_token[token_id] for token_id in token_ids)
-
-
 # utils
 
 torch.set_default_tensor_type('torch.cuda.FloatTensor')
@@ -145,18 +102,24 @@ def export_batch():
     upload_pkl(episode_data, 'bcz-pkl', str(episode_id))
     episode_id += 1
 
-def encode_batch():  
+def encode_batch(batch_size=100):  
   input_bucket = 'bcz-pkl'
   output_bucket = 'bcz-encode'
   text_model = Llama()
   image_model, image_preproc = load_clip("ViT-L/14@336px")
   image_model.cuda().eval()  
-  start_index = get_obj_count(output_bucket) - 1
-  for n in range(start_index, start_index + 100):
+  if get_obj_count(output_bucket) == 0:
+    start_index = 0
+  else:
+    start_index = get_obj_count(output_bucket) - 1
+
+  for n in range(start_index, start_index + batch_size):
     ep = download_pkl('bcz-pkl', f'{n}.pkl')
     if not ep[0]['episode_success']: continue
     instr = ep[0]['nl_instructions']
-    text_encode = text_model.encode_text([instr])
+    text = text_model.encode_text([instr])
+    text_clone = text.clone().detach() 
+    text_clone.requires_grad_(True)
     output = []
     print('episode encoded: ', n)
     for step in ep:
@@ -168,22 +131,24 @@ def encode_batch():
         step['next_xyz'], step['next_axis'], step['next_gripper']
       ))
       image = Image.fromarray(step['image'])
-      step['image_encode'] = image_preproc(image).unsqueeze(0).to("cuda")
-      step['text_encode'] = text_encode
+      image = image_preproc(image).unsqueeze(0).to("cuda")
+      image = image_model(image)
+      image_clone = image.clone().detach() 
+      image_clone.requires_grad_(True)
+      step['image_encode'] = image_clone  
+      step['text_encode'] = text_clone
       output.append(step)
     upload_pkl(output, output_bucket, str(n))
 
 # bc_z dataloader
-def get_ep(ep_num=1):
+def sample_encoded_ep(ep_num=1):
   ep = download_pkl('bcz-encode', f'{ep_num}.pkl')
   print('step count: ', len(ep))
   step_1 = ep[0]  
   src = step_1['src']
-  tokenizer = Tokenizer()
-  split_src = tokenizer.segment_string(src)
-  print('split source:\t', split_src)
-  token_ids = tokenizer.encode(src)
-  print('token ids:\t', token_ids)
+  tgt = step_1['tgt']
+  print('tgt type:', type(tgt))
+  print('tgt:', tgt)
 
 
-get_ep()
+# encode_batch()
